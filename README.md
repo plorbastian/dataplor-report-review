@@ -84,6 +84,23 @@ Developed while processing DataPlor sample_id=9990 (Red Bull PH, Metro Manila) o
 - **Dupelex report 514683:** 29,497,935 raw pairs → 1,516 confirmed merges pushed via `matches:process` (container task 295411). Sample dropped 59,314 → 57,891 POIs. Zero dirty children in either role. Four size-15 false-positive clusters (Makati Medical Center + doctors, Power Plant Mall + tenants, SyCipLaw firm + 10 lawyers) blocked by the safety filters — those would have collapsed dozens of distinct POIs into one.
 - **Export DQ pass:** post-cleanup checks against sample 9990 found and cleaned 87 garbage-name POIs (40 city-placeholder names, 47 name==address) + pushed 200 more chain-verified missed dupes via `matches:process` (95 same-chain <20m + 105 name-based <20m). These would have shown up as anomalies in the client-facing export.
 
+## Quickstart
+
+```bash
+git clone https://github.com/plorbastian/dataplor-report-review.git
+cd dataplor-report-review
+pip install -e .
+
+# smoke tests (no DB / LLM / network needed)
+python -m unittest tests.test_smoke -v
+```
+
+Each layer is a thin `checks/verdict/act` triad. You wire the `verdict_fn`
+to your inline-reasoning LLM (Anthropic, OpenAI, whatever) — every module
+has a `verdict_*_placeholder(...)` docstring showing the expected signature.
+See `examples/full_flow_9990.py` for the end-to-end walkthrough of the
+seven layers on a real delivery.
+
 ## Not a rules engine
 
 The LLM review steps deliberately use inline reasoning per POI, not hardcoded regex rules. Patterns appear only as **rejection safeties** (never as approval shortcuts):
