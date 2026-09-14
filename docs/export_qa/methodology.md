@@ -28,6 +28,15 @@ Anything the export sees comes from that view. This QA layer runs the same join 
 | `residual_name_dupes` | Same normalized name + Haversine <50m, missed by dupelex | Missed dupes. Group by name, pairwise within group. |
 | `same_chain_close` | Same chain_id + Haversine <20m, missed by dupelex | Chain-verified missed dupes. Very high signal — near-zero FPs. |
 
+## Run against the DELIVERED CSV, not just the DB view
+
+The DB view (`sample_places JOIN places`) is a proxy for what the export delivers, but it is not the same thing. The export flattens fields, uses the customer-facing `dataplor_id` UUID instead of internal `place_id`, and can round coordinates. On sample 9990, running QA only against the DB view missed:
+
+- 13 rows where `name` was a prefix substring of `address` (name `"2284 Cervera"` vs address `"2284 Cervera, Makati, 1230"`) — the DB `name = address` equality check missed these because the strings weren't equal.
+- 90 residual dupes on container categories (LKG Tower, Perla Mansion, Ecoplaza Building) — the DB-side residual-dupe filter had been skipping `container_categories` to avoid transitive drift, but those same clusters showed up in the delivered CSV as obviously the same POI duplicated.
+
+The right pattern is: run the DB-view checks first (fast, catches most), then download the delivered CSV and re-run the checks against it (`from_csv.py`). The LLM decides per cluster, not per pattern — containers should not be auto-skipped.
+
 ## Two-layer flow: WIDEN then NARROW
 
 Every check has to go through two passes:

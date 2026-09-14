@@ -52,13 +52,24 @@ def placeholder_names(conn, sample_id, terms=PLACEHOLDER_TERMS_DEFAULT):
 
 
 def name_equals_address(conn, sample_id):
-    """Places where p.name literally equals p.address — placeholder pattern."""
+    """Places where p.name literally equals OR is a leading substring of p.address.
+
+    A strict equality check misses the common failure mode where a POI's
+    name is stored as `"2284 Cervera"` while its address is
+    `"2284 Cervera, Makati, 1230"` — same placeholder, different string.
+    We catch both patterns and let the LLM decide per POI whether the
+    name is a legitimate business identifier that happens to look like
+    an address (rare) or a placeholder to remove (common).
+    """
     with conn.cursor() as c:
         c.execute("""SELECT p.id, p.name, p.business_category_id, p.address
                      FROM sample_places sp JOIN places p ON p.id=sp.place_id
                      WHERE sp.sample_id=%s
                        AND p.name IS NOT NULL AND p.address IS NOT NULL
-                       AND p.name = p.address""", (sample_id,))
+                       AND LENGTH(p.name) >= 3
+                       AND (p.name = p.address
+                            OR p.address ILIKE p.name || ',%%'
+                            OR p.address ILIKE p.name || ' %%')""", (sample_id,))
         return c.fetchall()
 
 

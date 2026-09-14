@@ -21,6 +21,6 @@ Every check function returns raw candidates. Every action function
 takes LLM-labeled inputs. Callers must wire an LLM verdict function
 between the two — see `verdict.py` for the reference signatures.
 """
-from . import checks, verdict, act
+from . import checks, verdict, act, components, from_csv
 
-__all__ = ["checks", "verdict", "act"]
+__all__ = ["checks", "verdict", "act", "components", "from_csv"]
