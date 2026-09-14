@@ -28,15 +28,29 @@ Anything the export sees comes from that view. This QA layer runs the same join 
 | `residual_name_dupes` | Same normalized name + Haversine <50m, missed by dupelex | Missed dupes. Group by name, pairwise within group. |
 | `same_chain_close` | Same chain_id + Haversine <20m, missed by dupelex | Chain-verified missed dupes. Very high signal — near-zero FPs. |
 
+## Two-layer flow: WIDEN then NARROW
+
+Every check has to go through two passes:
+
+1. **WIDEN (checks.py)** — pattern-based candidate surfacers. Patterns are cheap and catch failure modes we know exist. They are not authorized to approve any action on their own; they only build the candidate pool.
+
+2. **NARROW (verdict.py)** — per-POI LLM reasoning. Each candidate goes through inline judgment with the full context (name, category, address, brand, coords, external IDs, chain membership, provisional status). The LLM decides KEEP vs DELETE, MERGE vs DISTINCT, KEEP vs UNCHAIN. This is where the operator directive lives:
+
+   > "debes ser inteligente, no puede ser por patrones o cosas específicas"
+
+Patterns can never say "this POI is garbage". Only the LLM can. The pattern's role is to say "here's a candidate worth reasoning about".
+
+3. **ACT (act.py)** — takes LLM-labeled inputs (`verdict.delete_ids`, `verdict.merge_pairs`, `verdict.unchain_ids`) and applies the decisions to the DB.
+
 ## Actions
 
-| Finding | Action | Path |
-|---------|--------|------|
-| Placeholder name | DELETE from `sample_places` (keep row in `places`) | `act.delete_from_sample_places` |
-| name==address | DELETE from `sample_places` | `act.delete_from_sample_places` |
-| Short-name garbage (LLM-confirmed) | DELETE from `sample_places` | `act.delete_from_sample_places` |
-| Missed dupe (LLM-confirmed) | MERGE via `matches:process` | `act.write_merge_pair_csv` → `dupelex.merge_push.trigger_matches_process` |
-| chain-cat mismatch (LLM-confirmed FP) | Write `/chain_id` NULL observation | `chain.apply.write_observations_csv` (value=null) |
+| Finding | Verdict path | Action if LLM confirms |
+|---------|--------------|------------------------|
+| Placeholder name | `verdict_single_placeholder` → DELETE | `act.delete_from_sample_places` |
+| name==address | `verdict_single_placeholder` → DELETE | `act.delete_from_sample_places` |
+| Short-name | `verdict_single_placeholder` → DELETE/KEEP | `act.delete_from_sample_places` |
+| Missed dupe | `verdict_pair_placeholder` → MERGE/DISTINCT | `act.write_merge_pair_csv` → `dupelex.merge_push.trigger_matches_process` |
+| chain-cat mismatch | `verdict_single_placeholder` → UNCHAIN/KEEP | `chain.apply.write_observations_csv` (chain_id=null) |
 
 ## Why this must run per sample, not just from dupelex
 
