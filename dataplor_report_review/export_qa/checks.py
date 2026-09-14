@@ -125,6 +125,94 @@ def residual_name_dupes(conn, sample_id, max_meters=50, min_name_len=3,
     return out
 
 
+def geocode_centroid_pileup(conn, sample_id, min_pile=100):
+    """POIs that share the SAME (lat, lng) — usually a geocode fell back
+    to a bounding-box centroid instead of matching the address.
+
+    On sample 9990 (Red Bull PH), the canonical-check surfaced 574 POIs
+    pinned at the p99 lat/lon ceiling — the "default centroid" pattern.
+    A run of the same coord across N POIs is the tell.
+    """
+    with conn.cursor() as c:
+        c.execute("""
+            SELECT ROUND(p.latitude::numeric, 5) AS lat, ROUND(p.longitude::numeric, 5) AS lng,
+                   COUNT(*) AS n, ARRAY_AGG(p.id) AS place_ids
+            FROM sample_places sp
+            JOIN places p ON p.id = sp.place_id
+            WHERE sp.sample_id = %s
+              AND p.latitude IS NOT NULL
+              AND p.longitude IS NOT NULL
+            GROUP BY ROUND(p.latitude::numeric, 5), ROUND(p.longitude::numeric, 5)
+            HAVING COUNT(*) >= %s
+            ORDER BY COUNT(*) DESC
+        """, (sample_id, min_pile))
+        return c.fetchall()
+
+
+def hours_2400_ambiguity(conn, sample_id):
+    """POIs with 00:00 open + 00:00 close on any weekday — the encoding
+    is ambiguous between "24 hours" and "closed that day".
+
+    The canonical check on sample 9990 called this out as one of the
+    top DQ items — ~4,000 rows per weekday show this pattern. Not all
+    are 24/7 (some are genuinely-closed days); the delta between them
+    is whether `additional_open_hours` carries a `24/7` marker.
+    """
+    with conn.cursor() as c:
+        c.execute("""
+            SELECT p.id, p.business_category_id, p.name,
+                   p.monday_open, p.monday_close,
+                   p.tuesday_open, p.tuesday_close,
+                   p.wednesday_open, p.wednesday_close,
+                   p.thursday_open, p.thursday_close,
+                   p.friday_open, p.friday_close,
+                   p.saturday_open, p.saturday_close,
+                   p.sunday_open, p.sunday_close,
+                   p.additional_open_hours
+            FROM sample_places sp
+            JOIN places p ON p.id = sp.place_id
+            WHERE sp.sample_id = %s
+              AND ((p.monday_open = '00:00' AND p.monday_close = '00:00')
+                OR (p.tuesday_open = '00:00' AND p.tuesday_close = '00:00')
+                OR (p.wednesday_open = '00:00' AND p.wednesday_close = '00:00')
+                OR (p.thursday_open = '00:00' AND p.thursday_close = '00:00')
+                OR (p.friday_open = '00:00' AND p.friday_close = '00:00')
+                OR (p.saturday_open = '00:00' AND p.saturday_close = '00:00')
+                OR (p.sunday_open = '00:00' AND p.sunday_close = '00:00'))
+        """, (sample_id,))
+        return c.fetchall()
+
+
+def historical_scores_pre_opened(conn, sample_id, score_col="historical_popularity_scores"):
+    """POIs with entries in `historical_popularity_scores` (or
+    `historical_sentiment_scores`) for months earlier than
+    `first_opened`.
+
+    The underlying model back-fills newly-opened POIs from neighbours,
+    so pre-open months reflect modelled traffic, not observed. The
+    canonical check flags 2,400+ POIs on 9990. Fix: at delivery time
+    either null the pre-open month keys or add a metadata flag to
+    distinguish observed vs modelled months.
+    """
+    with conn.cursor() as c:
+        c.execute(f"""
+            SELECT p.id, p.name, p.first_opened,
+                   (SELECT jsonb_object_agg(k, v)
+                    FROM jsonb_each(p.{score_col})
+                    WHERE k::date < p.first_opened::date) AS pre_open_entries
+            FROM sample_places sp
+            JOIN places p ON p.id = sp.place_id
+            WHERE sp.sample_id = %s
+              AND p.first_opened IS NOT NULL
+              AND p.{score_col} IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM jsonb_object_keys(p.{score_col}) k
+                  WHERE k::date < p.first_opened::date
+              )
+        """, (sample_id,))
+        return c.fetchall()
+
+
 def same_chain_close(conn, sample_id, max_meters=20, skip_group_larger_than=200):
     """Same chain_id + Haversine < max_meters. These are almost always
     dupes the dupelex report missed (score too low, or no strong signal).

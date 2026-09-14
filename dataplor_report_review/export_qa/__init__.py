@@ -10,7 +10,9 @@ Layered by design:
 
   checks.py  — WIDEN the candidate pool with cheap indicators (name
                length, name-address equality, chain-cat mismatch,
-               same-name/same-chain proximity).
+               same-name/same-chain proximity, geocode-centroid
+               pile-ups, 24/7-vs-closed hours ambiguity, and
+               historical-scores-pre-opened_on).
   verdict.py — NARROW to real issues via inline LLM reasoning per POI
                (or per pair). Patterns never approve on their own; the
                LLM is the decider.

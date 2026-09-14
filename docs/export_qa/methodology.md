@@ -27,6 +27,9 @@ Anything the export sees comes from that view. This QA layer runs the same join 
 | `chain_cat_mismatch` | chain_id set on `hospital` / `condominium_complex` / `church` / etc. | chain_id got attached to a container-type POI. Some legit (bank branch in a condo building), most FPs. Requires LLM per-POI. |
 | `residual_name_dupes` | Same normalized name + Haversine <50m, missed by dupelex | Missed dupes. Group by name, pairwise within group. |
 | `same_chain_close` | Same chain_id + Haversine <20m, missed by dupelex | Chain-verified missed dupes. Very high signal — near-zero FPs. |
+| `geocode_centroid_pileup` | ≥100 POIs sharing the same (lat, lng) after rounding to 5 decimals | Geocode fell back to a bounding-box centroid instead of matching the address. On 9990 the canonical check flagged 574 POIs pinned to the p99 lat/lon. |
+| `hours_2400_ambiguity` | POIs with 00:00 open + 00:00 close on any weekday | Encoding is ambiguous between "24 hours" and "closed that day" — the `additional_open_hours` `24/7` marker is the disambiguator. Sample 9990 had ~4,000/day rows in this state. |
+| `historical_scores_pre_opened` | Entries in `historical_popularity_scores` / `historical_sentiment_scores` keyed to months before `first_opened` | The model back-fills new POIs from neighbours, so pre-open months are modelled, not observed. At delivery, null the pre-open month keys or add a metadata flag distinguishing observed vs modelled. On 9990: 2,476 POIs / 24,180 entries for popularity, 340 / 3,437 for sentiment. |
 
 ## Run against the DELIVERED CSV, not just the DB view
 
