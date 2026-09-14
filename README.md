@@ -2,11 +2,14 @@
 
 Standardized LLM-assisted methodology for reviewing DataPlor sample reports at scale, POI-por-POI, with production propagation and safety filters against systematic false positives.
 
-Three workflows in one repo:
+Six workflows in one repo:
 
 - **`dupelex/`** — pairwise duplicate review (Chase-ATM guard, category-family guard, refined re-guard, LLM medium tier, container+tenant safety, big-component strict-name filter).
 - **`chain/`** — per-POI chain-membership review for unchained candidates in a sample (unchained-state trap, brand-context enrichment, category compatibility, per-POI LLM verdicts).
 - **`export_qa/`** — post-cleanup DQ checks on the `sample_places JOIN places` view the client-facing `place_export` reads from. Catches garbage names (city placeholders, unit labels, name==address rows) and residual dupes below the dupelex report threshold.
+- **`visits/`** — the Javaria pattern: chained POIs whose `business_category_id` is not in the brand's `core_1_category_ids` / `core_2_category_ids` get their visits silently stripped at export time. LLM per-POI verdict against the customer's use case.
+- **`congruence/`** — three-way DB ↔ export ↔ post-export parity. Row-count, UUID coverage, chain coverage, no phantom rows, no leaked children, defensible column strips.
+- **`darc_check/`** — DARC form (Google Sheet) vs Linear ticket vs `samples.schema` vs sample-forge's `canonical_check.json` — reconcile the four surfaces so nothing silently drifts.
 
 Both flows share the DataPlor plumbing:
 

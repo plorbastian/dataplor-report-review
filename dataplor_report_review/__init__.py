@@ -17,6 +17,23 @@ Three workflows, one repo:
                 and residual dupes the dupelex report missed at the
                 pair-report threshold.
 
+  visits/     — the Javaria pattern. A chained POI whose category is NOT
+                in the brand's core_1_category_ids / core_2_category_ids
+                gets its visits silently stripped at export time. This
+                module surfaces the affected POIs and takes a per-POI
+                LLM verdict against the customer's use case.
+
+  congruence/ — three-way DB ↔ export ↔ post-export parity. Invariant
+                checks that no POI is lost, no merged child leaks, no
+                phantom row is invented, and no core column is stripped
+                without a defensible reason.
+
+  darc_check/ — the sample's DARC form (Google Sheet) must agree with
+                the Linear ticket that requested it AND with the
+                samples.schema JSONB the export emits. The Canonical
+                Check tab of the DARC form must be reconciled against
+                sample-forge's canonical-check JSON.
+
 Shared plumbing:
   - Sebastian's admin_id (42476) for observations attribution.
   - `places_read_metal` for enrichment (read replica).
