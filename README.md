@@ -1,54 +1,72 @@
-# dupelex-llm-review
+# dataplor-report-review
 
-Standardized 7-phase methodology for reviewing DataPlor `dupelex` reports at scale, POI-por-POI, with LLM inline reasoning and multi-layer safety filters against transitive-drift false positives.
+Standardized LLM-assisted methodology for reviewing DataPlor sample reports at scale, POI-por-POI, with production propagation and safety filters against systematic false positives.
+
+Two workflows in one repo:
+
+- **`dupelex/`** — pairwise duplicate review (Chase-ATM guard, category-family guard, refined re-guard, LLM medium tier, container+tenant safety, big-component strict-name filter).
+- **`chain/`** — per-POI chain-membership review for unchained candidates in a sample (unchained-state trap, brand-context enrichment, category compatibility, per-POI LLM verdicts).
+
+Both flows share the DataPlor plumbing:
+
+- `places_read_metal` for enrichment (read replica, ~5min lag).
+- `prod` cluster for writes (DELETE from `sample_places`, observations, chain_id).
+- `api.dataplor.com/v3/admin/rake_tasks` on Fargate for `matches:process` and `observations:apply`.
+- Sebastian's `admin_id=42476` for attribution.
 
 ## Why this exists
 
-A raw dupelex report over a large sample (e.g. `sample_id=9990`, ~59K places, Metro Manila) produces on the order of **30 million candidate pairs**. Only a tiny fraction are actual dupes. Naive score-thresholding + auto-merge collapses distinct POIs together (a mall + its tenants, a hospital + its departments, an office building + its subsidiaries) — the classic "Chase-ATM pattern" and "container+tenant" failure modes.
+Naive score-thresholding on either report type produces catastrophic false positives at scale:
 
-This package encodes the reviewer methodology we developed to make dupelex safe at scale:
+- **Dupelex** — a mall row merges with each of its ~50 tenant rows because Google indexes tenants with the mall name in their record. A hospital row merges with 100+ doctor and department rows. Two banks (e.g. PSBank and PS Bank) with different Google Places IDs get merged because their name/website/phone/coords all match.
+- **Chain** — a naive `state="same"` filter misses ~90% of legitimate chain additions on unchained POIs, because the model returns `state="different"` for every candidate when there's no anchor.
 
-1. **Filter** the raw 30M pairs down to an actionable set using a strong-signals rule.
-2. **Enrich** each pair from `places_read_metal` with full context + external IDs.
-3. **Chase-ATM guard** — reject when two POIs are distinguishable (different `gpid`, different URL slug, different Yext source).
-4. **Category-family guard** — reject when categories cross incompatible families (bank vs restaurant).
-5. **Refined re-guard** — override the guard when the same-name/close-coords/shared-host pattern actually indicates a Google double-index.
-6. **LLM POI-por-POI** — for ambiguous middle-tier pairs, apply inline reasoning per pair (not pattern rules) with full context.
-7. **Component safety** — union-find over the merge graph, then reject any pair that connects into a large component (size ≥ 5) with non-identical names (kills transitive drift).
+The methodology below is designed to catch each failure mode explicitly, with per-POI LLM reasoning as the decider (never regex or hardcoded rules on the approval path).
 
-The output is a clean pair CSV ready for `matches:process` on Fargate, plus a downstream **sample_places** cleanup + verification step.
-
-## The 7 phases
+## dupelex — 7 phases
 
 | Phase | Module | Input | Output |
 |-------|--------|-------|--------|
-| 1. Filter | `filter.py` | raw dupelex CSV.gz (~30M rows) | actionable pairs CSV (~20K rows) |
-| 2. Enrich | `enrich.py` | actionable pairs + DB | pairs with full context, external_ids |
-| 2b. Guard | `guard.py` | enriched pairs | tiered: auto_accept / high_conf / medium / reject_guard / reject_category |
-| 2c. Reguard | `reguard.py` | reject_guard bucket | overrides for same-name + supporting-signal cases |
-| 3. LLM Review | `llm_review.py` | medium tier | verdicts MERGE / DISTINCT / UNCLEAR per pair |
-| 3.5. Safety | `safety.py` + `strict.py` | consolidated merge pair list | strict-name components, container+tenant rejects, practitioner rejects |
-| 4. Push | `merge_push.py` | final pair CSV | matches:process rake task on Fargate |
-| 5. Cleanup | `sample_cleanup.py` | sample_id | DELETE from sample_places WHERE parent_id IS NOT NULL |
-| 6. Verify | `verify.py` | sample_id | prod + places_read_metal state check |
+| 1. Filter | `dupelex.filter` | raw dupelex .csv.gz (~30M rows) | actionable pairs CSV (~20K rows) |
+| 2. Enrich | `dupelex.enrich` | actionable pairs + DB | pairs with full context, external_ids |
+| 2b. Guard | `dupelex.guard` | enriched pairs | tiered: auto_accept / high_conf / medium / reject_guard / reject_category |
+| 2c. Reguard | `dupelex.reguard` | reject_guard bucket | overrides for same-name + supporting-signal cases |
+| 3. LLM Review | `dupelex.llm_review` | medium tier | verdicts MERGE / DISTINCT / UNCLEAR per pair |
+| 3.5. Safety | `dupelex.safety` + `dupelex.strict` | consolidated merge list | strict-name components, container+tenant + practitioner rejects |
+| 4. Push | `dupelex.merge_push` | final pair CSV | matches:process rake task on Fargate |
+| 5. Cleanup | `dupelex.sample_cleanup` | sample_id | DELETE from sample_places WHERE parent_id IS NOT NULL |
+| 6. Verify | `dupelex.verify` | sample_id | prod + places_read state check |
 
-## Failure modes this catches
+**Failure modes this catches:** Chase-ATM pattern, container+tenant (mall + Zara), practitioner sharing a building (15 doctors + Makati Med + BDO ATM), subsidiaries (BPI Leasing + BPI Foundation), rebrand naming variants (Popeyes Chicken vs Popeyes Louisiana Kitchen), transitive drift (A↔B + B↔C + C↔D forming a 4-way false component).
 
-- **Chase-ATM pattern** — two POIs at the same coordinates with matching name+phone but different `google_places_id` → distinct.
-- **Container+tenant** — a shopping mall row and a tenant row both named "Foo Mall" → distinct.
-- **Practitioner sharing a building** — 15 doctors at the same medical center address, all `Dr. X @ Makati Med` → distinct.
-- **Subsidiaries** — "BPI ATM" + "BPI Leasing" + "BPI Forex" + "BPI Foundation" all at HQ address → distinct.
-- **Rebrand/naming variants** — the same POI indexed as "Popeyes Chicken - Kroma" and "Popeyes Louisiana Kitchen" at the same address → merge.
-- **Transitive drift** — pair A↔B (legit) + B↔C (legit) + C↔D (legit) forms a size-4 component; strict-name filter enforces "all four normalize to the same name" before allowing the merge.
+Full write-up: [docs/dupelex/methodology.md](docs/dupelex/methodology.md).
+
+## chain — 6 phases
+
+| Phase | Module | Input | Output |
+|-------|--------|-------|--------|
+| 1. Filter | `chain.filter` | chain report .json.gz | rank-1 candidates for unchained POIs, score >= 0.5 |
+| 2. Enrich | `chain.enrich` | candidates + DB | place context + brand context (allowed/banned cats, aliases, website root) |
+| 3. LLM Review | `chain.llm_review` | candidates + context | verdicts APPLY / SKIP / UNCLEAR per POI |
+| 4. Apply | `chain.apply` | APPLY verdicts | write /chain_id observations via mass_observations.py |
+| 5. PTU | (via `mass_observations.py`) | S3 obs payload | enqueue place_tree_updater jobs on Fargate |
+| 6. Verify | `chain.verify` | sample_id | prod + places_read chain coverage parity |
+
+**Failure modes this catches:** unchained-state trap (state=different for every candidate), namesake false positives (brand names that overlap with surnames or city names), country-scope drift (global chain reports vs country-scoped reports), rfi=false suppression (silent empty candidate lists when the brand's `ready_for_identification=false`).
+
+Full write-up: [docs/chain/methodology.md](docs/chain/methodology.md).
 
 ## Origin
 
-Developed while processing the DataPlor Red Bull PH sample_id=9990 dupelex report (id=514683), 2026-09-14. See [docs/methodology.md](docs/methodology.md) for the full reasoning trace behind each rule and the specific failure cases that motivated each safety filter.
+Developed while processing DataPlor sample_id=9990 (Red Bull PH, Metro Manila) on 2026-09-14:
+
+- **Chain report:** 292 chain_id observations landed (266 Fase A chain report + 26 Fase B brandisco), verified in both roles.
+- **Dupelex report 514683:** 29,497,935 raw pairs → 1,516 confirmed merges pushed via `matches:process` (container task 295411). Sample dropped 59,314 → 57,891 POIs. Zero dirty children in either role. Four size-15 false-positive clusters (Makati Medical Center + doctors, Power Plant Mall + tenants, SyCipLaw firm + 10 lawyers) blocked by the safety filters — those would have collapsed dozens of distinct POIs into one.
 
 ## Not a rules engine
 
-The LLM review step deliberately uses inline reasoning per pair, not hardcoded regex rules. Patterns are used only as **rejection safeties** (never as approval shortcuts) — the operator's directive was:
+The LLM review steps deliberately use inline reasoning per POI, not hardcoded regex rules. Patterns appear only as **rejection safeties** (never as approval shortcuts):
 
 > "debes ser inteligente, no puede ser por patrones o cosas específicas"
 
-Approval decisions require per-POI context (address, category, brand, coordinates, external IDs) evaluated together, not matched against a shortlist.
+Approval decisions require per-POI context (name, address, category, brand, coordinates, external IDs, chain membership) evaluated together, not matched against a shortlist.

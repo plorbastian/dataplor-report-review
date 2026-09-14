@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dupelex-llm-review"
-version = "0.1.0"
-description = "Standardized 7-phase LLM-assisted review for DataPlor dupelex reports with transitive-drift safety filters."
+name = "dataplor-report-review"
+version = "0.2.0"
+description = "Standardized LLM-assisted review of DataPlor sample reports (chain + dupelex) with transitive-drift safety and production propagation."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
@@ -18,8 +18,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/plorbastian/dupelex-llm-review"
+Homepage = "https://github.com/plorbastian/dataplor-report-review"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["dupelex_llm_review*"]
+include = ["dataplor_report_review*"]
