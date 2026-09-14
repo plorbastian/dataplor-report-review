@@ -2,10 +2,11 @@
 
 Standardized LLM-assisted methodology for reviewing DataPlor sample reports at scale, POI-por-POI, with production propagation and safety filters against systematic false positives.
 
-Two workflows in one repo:
+Three workflows in one repo:
 
 - **`dupelex/`** — pairwise duplicate review (Chase-ATM guard, category-family guard, refined re-guard, LLM medium tier, container+tenant safety, big-component strict-name filter).
 - **`chain/`** — per-POI chain-membership review for unchained candidates in a sample (unchained-state trap, brand-context enrichment, category compatibility, per-POI LLM verdicts).
+- **`export_qa/`** — post-cleanup checks on the `sample_places JOIN places` view the client-facing `place_export` reads from. Catches garbage names (`"Makati"`, `"Manila"` as name; name==address) and residual dupes the dupelex report missed. The "Alison layer" from the IDCTECH incident 2026-09-08.
 
 Both flows share the DataPlor plumbing:
 
@@ -56,12 +57,28 @@ Full write-up: [docs/dupelex/methodology.md](docs/dupelex/methodology.md).
 
 Full write-up: [docs/chain/methodology.md](docs/chain/methodology.md).
 
+## export_qa — post-cleanup anomaly checks
+
+Runs AFTER dupelex + chain have landed. Reproduces the client-facing `sample_places JOIN places (places_read_metal)` view and surfaces anomalies.
+
+| Check | What it catches | Action |
+|-------|-----------------|--------|
+| `short_names` | Names ≤3 chars, digits-only, symbols-only | LLM per-POI (many legit brands like K2, LG) |
+| `placeholder_names` | Names like `"Makati"`, `"Manila"`, `"Suite"` | DELETE from sample_places |
+| `name_equals_address` | `name = address` exactly | DELETE from sample_places |
+| `chain_cat_mismatch` | chain_id set on hospital / condo / church / apartment | LLM per-POI (some legit) |
+| `residual_name_dupes` | Same normalized name + <50m, missed by dupelex | MERGE via matches:process |
+| `same_chain_close` | Same chain_id + <20m, missed by dupelex | MERGE via matches:process |
+
+Full write-up: [docs/export_qa/methodology.md](docs/export_qa/methodology.md).
+
 ## Origin
 
 Developed while processing DataPlor sample_id=9990 (Red Bull PH, Metro Manila) on 2026-09-14:
 
 - **Chain report:** 292 chain_id observations landed (266 Fase A chain report + 26 Fase B brandisco), verified in both roles.
 - **Dupelex report 514683:** 29,497,935 raw pairs → 1,516 confirmed merges pushed via `matches:process` (container task 295411). Sample dropped 59,314 → 57,891 POIs. Zero dirty children in either role. Four size-15 false-positive clusters (Makati Medical Center + doctors, Power Plant Mall + tenants, SyCipLaw firm + 10 lawyers) blocked by the safety filters — those would have collapsed dozens of distinct POIs into one.
+- **Export QA (Alison layer):** post-cleanup checks against sample 9990 found and cleaned 87 garbage-name POIs (40 placeholder names, 47 name==address) + pushed 200 more chain-verified missed dupes via `matches:process` (95 same-chain <20m + 105 name-based <20m). These would have shown up as anomalies in the client-facing export.
 
 ## Not a rules engine
 
