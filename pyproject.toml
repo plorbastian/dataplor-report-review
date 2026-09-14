@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dupelex-llm-review"
+version = "0.1.0"
+description = "Standardized 7-phase LLM-assisted review for DataPlor dupelex reports with transitive-drift safety filters."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    {name = "plorbastian", email = "sebastian@dataplor.com"}
+]
+license = {text = "MIT"}
+dependencies = [
+    "psycopg2-binary>=2.9",
+    "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/plorbastian/dupelex-llm-review"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dupelex_llm_review*"]
