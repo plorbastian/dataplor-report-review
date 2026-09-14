@@ -39,6 +39,92 @@ PLACEHOLDER_TERMS_DEFAULT = (
 )
 
 
+# Garbage-name patterns caught at Excel-view time on sample 9990:
+# what LOOKS bad to a client staring at the spreadsheet, even if the
+# row is technically valid data.
+#
+# CAREFUL: many "weird" names are legitimate foreign-language
+# businesses (Hebrew, Arabic, Devanagari, Tamil, CJK, Thai). Do NOT
+# treat non-Latin script as garbage — Excel's poor RTL support renders
+# real Hebrew names as "x'x™x,x x¡" but the underlying data is fine.
+#
+# Only the patterns below are safe to flag WITHOUT LLM confirmation
+# per-POI; every other suspicious name should go through the LLM
+# verdict layer.
+def is_client_facing_garbage_name(name: str) -> tuple:
+    """Return (is_garbage, reason) for names that will look bad to the
+    client regardless of the underlying data being valid.
+    """
+    import re
+    if not name:
+        return False, ""
+    n = name.strip()
+    if not n:
+        return False, ""
+
+    # 1. Single Latin 1-2 char — Google Places auto-truncation
+    # ("V", "Jm", "IT"). Rarely a real business.
+    if len(n) <= 2 and re.fullmatch(r"[A-Za-z]{1,2}", n):
+        return True, "single-latin-char"
+
+    # 2. Asterisk-wrapped run-on gibberish
+    # (*positiveherespectreedisbyesemanubaisth*)
+    if re.match(r"^\*[^*\s]{10,}\*", n):
+        return True, "asterisk-wrapped-runon"
+
+    # 3. Mathematical italic Unicode decoration
+    # (𝐴𝑟𝑗𝑜𝑛 𝑡𝑎𝑙𝑖𝑛𝑜 — stylized text, not real name)
+    if sum(1 for ch in n if 0x1D400 <= ord(ch) <= 0x1D7FF) >= 3:
+        return True, "math-italic-decoration"
+
+    # 4. Small-caps Unicode decoration (ɴᴀɪʟꜱ ʙʏ ɴɪᴋꜱ)
+    if sum(1 for ch in n if 0x1D00 <= ord(ch) <= 0x1D7F) >= 4:
+        return True, "smallcaps-decoration"
+
+    # 5. Name IS a date-format string ("11-Jul", "Jul-11")
+    if re.fullmatch(r"\d{1,2}-[A-Za-z]{3}", n) \
+       or re.fullmatch(r"[A-Za-z]{3}-\d{1,2}", n):
+        return True, "date-format-name"
+
+    # 6. Name starts with "@" (handle-style, "@aye Billiard Hall")
+    if n.startswith("@"):
+        return True, "at-handle-prefix"
+
+    # 7. Name is wrapped in double-quotes ("budget Tapa King)
+    if n.startswith('"') and n.count('"') >= 2:
+        return True, "quote-wrapped-name"
+
+    # 8. Parenthesized lowercase code prefix ("(cmea)", "(rdc)")
+    # — an internal code, not a business name.
+    if re.match(r"^\([a-z]{2,5}\)", n):
+        return True, "parenthesized-code-prefix"
+
+    # 9. Phone-format prefix ("+81 Bar", "+63 Human Resource")
+    # — a phone country code got scraped into the name field.
+    if re.match(r"^\+\d{2,4}\s", n):
+        return True, "phone-format-prefix"
+
+    return False, ""
+
+
+def client_facing_garbage_names(conn, sample_id):
+    """Return sample_places rows where the delivered name matches one
+    of the visibly-broken patterns above. Callers should still confirm
+    per-POI before deleting — the check is safe on the patterns listed
+    but any expansion needs LLM verification."""
+    with conn.cursor() as c:
+        c.execute("""SELECT p.id, p.name, p.business_category_id, p.address
+                     FROM sample_places sp JOIN places p ON p.id=sp.place_id
+                     WHERE sp.sample_id=%s""", (sample_id,))
+        rows = c.fetchall()
+    out = []
+    for pid, name, cat, addr in rows:
+        bad, why = is_client_facing_garbage_name(name)
+        if bad:
+            out.append((pid, name, cat, addr, why))
+    return out
+
+
 def placeholder_names(conn, sample_id, terms=PLACEHOLDER_TERMS_DEFAULT):
     """Names that literally equal a placeholder term (city name, unit label)."""
     like_clauses = " OR ".join(["TRIM(p.name) ILIKE %s" for _ in terms])
