@@ -34,6 +34,15 @@ Three workflows, one repo:
                 Check tab of the DARC form must be reconciled against
                 sample-forge's canonical-check JSON.
 
+  remediate/  — post-canonical-check loop. Read canonical_check.json,
+                LLM triages each finding (FIXABLE_NOW / SYSTEMIC /
+                DELIVERY_NOTE / IGNORE), writes observations for the
+                fixable ones via mass_observations.py + PTU, and
+                decides per-batch whether the fix requires a fresh
+                place_export before delivery. Delivery gate: never
+                ship a CRITICAL that is fixable-now but not reflected
+                in the delivered CSV.
+
 Shared plumbing:
   - Sebastian's admin_id (42476) for observations attribution.
   - `places_read_metal` for enrichment (read replica).

@@ -2,7 +2,7 @@
 
 Standardized LLM-assisted methodology for reviewing DataPlor sample reports at scale, POI-por-POI, with production propagation and safety filters against systematic false positives.
 
-Six workflows in one repo:
+Seven workflows in one repo:
 
 - **`dupelex/`** — pairwise duplicate review (Chase-ATM guard, category-family guard, refined re-guard, LLM medium tier, container+tenant safety, big-component strict-name filter).
 - **`chain/`** — per-POI chain-membership review for unchained candidates in a sample (unchained-state trap, brand-context enrichment, category compatibility, per-POI LLM verdicts).
@@ -10,6 +10,7 @@ Six workflows in one repo:
 - **`visits/`** — the Javaria pattern: chained POIs whose `business_category_id` is not in the brand's `core_1_category_ids` / `core_2_category_ids` get their visits silently stripped at export time. LLM per-POI verdict against the customer's use case.
 - **`congruence/`** — three-way DB ↔ export ↔ post-export parity. Row-count, UUID coverage, chain coverage, no phantom rows, no leaked children, defensible column strips.
 - **`darc_check/`** — DARC form (Google Sheet) vs Linear ticket vs `samples.schema` vs sample-forge's `canonical_check.json` — reconcile the four surfaces so nothing silently drifts.
+- **`remediate/`** — post-canonical-check loop. LLM triages each finding as FIXABLE_NOW / SYSTEMIC / DELIVERY_NOTE / IGNORE, writes observations for the fixable ones, decides whether the fix requires a fresh export before delivery. Delivery gate: no CRITICAL fixable-now finding may be delivered without being reflected in the delivered CSV.
 
 Both flows share the DataPlor plumbing:
 
