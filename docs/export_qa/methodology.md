@@ -1,6 +1,6 @@
-# Methodology — post-cleanup export QA
+# Methodology — post-cleanup export DQ
 
-Third pillar of the review methodology. Runs AFTER dupelex + chain have landed and after Phase 5 sample_places cleanup. This is the "Alison layer" — named for the IDCTECH incident (2026-09-08) where a client-side QA pass surfaced two categories of errors that the dupelex pipeline had not caught:
+Third pillar of the review methodology. Runs AFTER dupelex + chain have landed and after Phase 5 sample_places cleanup. The DQ layer catches issues that the pair-based dupelex pipeline cannot see by construction:
 
 1. **Garbage names** — POIs whose `name` is a city placeholder ("Makati", "Manila"), a room label ("Room 204"), or the address string itself ("9681 Kamagong"). These are places DataPlor's ingestion pulled from Google without a real business name. They clutter the client-facing export and read as bad data even though the underlying POI might be a real venue.
 

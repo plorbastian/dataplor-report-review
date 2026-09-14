@@ -11,11 +11,11 @@ Three workflows, one repo:
                 in a sample, driven by brand context and category
                 constraints, applied via /chain_id observations.
 
-  export_qa/  — post-cleanup checks on the sample_places JOIN places view
-                the client-facing place_export reads from. Catches
-                garbage names (placeholders, name==address) and residual
-                dupes the dupelex report missed. Named after the "Alison
-                layer" from the IDCTECH incident (2026-09-08).
+  export_qa/  — post-cleanup DQ checks on the sample_places JOIN places
+                view the client-facing place_export reads from. Catches
+                garbage names (placeholders, name==address, unit labels)
+                and residual dupes the dupelex report missed at the
+                pair-report threshold.
 
 Shared plumbing:
   - Sebastian's admin_id (42476) for observations attribution.

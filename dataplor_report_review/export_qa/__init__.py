@@ -1,9 +1,10 @@
-"""export_qa — post-cleanup QA checks against sample_places JOIN places.
+"""export_qa — post-cleanup DQ checks against sample_places JOIN places.
 
 Run this after dupelex + chain have landed and Phase 5 cleanup has run.
 The checks reproduce the joins the client-facing `place_export` will
-perform, and surface anomalies that Alison-style QA (IDCTECH incident,
-2026-09-08) tends to flag.
+perform, and surface anomalies that a downstream client-side DQ pass
+tends to flag — the kind of issues that make a delivered CSV look
+unpolished even when the underlying rows are technically valid.
 
 Layered by design:
 

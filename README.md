@@ -6,7 +6,7 @@ Three workflows in one repo:
 
 - **`dupelex/`** — pairwise duplicate review (Chase-ATM guard, category-family guard, refined re-guard, LLM medium tier, container+tenant safety, big-component strict-name filter).
 - **`chain/`** — per-POI chain-membership review for unchained candidates in a sample (unchained-state trap, brand-context enrichment, category compatibility, per-POI LLM verdicts).
-- **`export_qa/`** — post-cleanup checks on the `sample_places JOIN places` view the client-facing `place_export` reads from. Catches garbage names (`"Makati"`, `"Manila"` as name; name==address) and residual dupes the dupelex report missed. The "Alison layer" from the IDCTECH incident 2026-09-08.
+- **`export_qa/`** — post-cleanup DQ checks on the `sample_places JOIN places` view the client-facing `place_export` reads from. Catches garbage names (city placeholders, unit labels, name==address rows) and residual dupes below the dupelex report threshold.
 
 Both flows share the DataPlor plumbing:
 
@@ -78,7 +78,7 @@ Developed while processing DataPlor sample_id=9990 (Red Bull PH, Metro Manila) o
 
 - **Chain report:** 292 chain_id observations landed (266 Fase A chain report + 26 Fase B brandisco), verified in both roles.
 - **Dupelex report 514683:** 29,497,935 raw pairs → 1,516 confirmed merges pushed via `matches:process` (container task 295411). Sample dropped 59,314 → 57,891 POIs. Zero dirty children in either role. Four size-15 false-positive clusters (Makati Medical Center + doctors, Power Plant Mall + tenants, SyCipLaw firm + 10 lawyers) blocked by the safety filters — those would have collapsed dozens of distinct POIs into one.
-- **Export QA (Alison layer):** post-cleanup checks against sample 9990 found and cleaned 87 garbage-name POIs (40 placeholder names, 47 name==address) + pushed 200 more chain-verified missed dupes via `matches:process` (95 same-chain <20m + 105 name-based <20m). These would have shown up as anomalies in the client-facing export.
+- **Export DQ pass:** post-cleanup checks against sample 9990 found and cleaned 87 garbage-name POIs (40 city-placeholder names, 47 name==address) + pushed 200 more chain-verified missed dupes via `matches:process` (95 same-chain <20m + 105 name-based <20m). These would have shown up as anomalies in the client-facing export.
 
 ## Not a rules engine
 
