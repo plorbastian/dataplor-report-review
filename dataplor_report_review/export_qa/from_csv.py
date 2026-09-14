@@ -68,9 +68,26 @@ def scan_placeholder_names(rows, terms=PLACEHOLDER_TERMS_DEFAULT, name_col="name
             if (r.get(name_col) or "").strip().lower() in terms]
 
 
-def scan_name_as_address(rows, name_col="name", addr_col="address"):
+def scan_name_as_address(rows, name_col="name", addr_col="address",
+                         digit_prefix_only=True):
     """Return rows where the name is a leading substring of the address.
     Catches both `name = address` and `name = address prefix` cases.
+
+    IMPORTANT: many legitimate business names are ALSO leading substrings
+    of their own address ("La Fuerza Plaza" at "La Fuerza Plaza, 2241
+    Chino Roces Ave" — the plaza's real name is literally its address
+    prefix). If you delete every row that matches, you drop 130+ legit
+    buildings, malls, condos, and hotels.
+
+    Default `digit_prefix_only=True` narrows to names that begin with a
+    digit ("2284 Cervera", "5865 Zobel Roxas", "3016C Estrella") —
+    those are almost always the address string being used as the name
+    because ingestion had no real business name to record. Legit
+    business names starting with a digit are rare and easy to confirm
+    per-POI with the LLM.
+
+    Set `digit_prefix_only=False` to widen to all substring matches and
+    let the LLM decide each candidate.
     """
     out = []
     for r in rows:
@@ -78,9 +95,12 @@ def scan_name_as_address(rows, name_col="name", addr_col="address"):
         a = (r.get(addr_col) or "").strip()
         if not n or not a or len(n) < 3:
             continue
-        if n == a or a.lower().startswith(n.lower() + ",") \
-                or a.lower().startswith(n.lower() + " "):
-            out.append(r)
+        if not (n == a or a.lower().startswith(n.lower() + ",")
+                or a.lower().startswith(n.lower() + " ")):
+            continue
+        if digit_prefix_only and not n[0].isdigit():
+            continue
+        out.append(r)
     return out
 
 
