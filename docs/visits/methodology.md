@@ -38,8 +38,10 @@ Do not decide by category alone. `bank` is not universally core; `corporate_offi
 
 ## Empirical on sample 9990 (Red Bull PH, 2026-09-14)
 
-- 572 chained POIs sit in the outside_all bucket AND have visits.
+- 572 chained POIs sit in the outside_all bucket AND have `estimated_visits_monthly` populated in the DB.
 - 106 are BDO (Banco de Oro) branches categorized as `bank` — but BDO's `core_1_category_ids` apparently does not include `bank` on this brand config.
 - 23 Metrobank, 20 Unionbank, 17 Watsons, 14 BPI — same pattern.
 
-For a Red Bull retail audit these are almost certainly `ACCEPT_STRIP` — banks aren't relevant to beverage POS. But for the next customer whose use case DOES value bank-branch traffic, the same 572 POIs are a delivery gap that this check catches before the CSV ships.
+**In the actual 9990 delivery, the strip did NOT materialize** — 559 of the 569 Javaria POIs that reached the final CSV kept their `popularity_score` and `historical_popularity_scores`, a 98.2% retention that matches the sample-wide baseline. That means for this specific delivery either (a) the strip is only applied to internal `estimated_visits_*` columns and NOT the customer-facing `popularity_score`, (b) the strip is brand-config-driven and BDO's config lets it through, or (c) the strip logic has changed since the original Javaria observation.
+
+**So this check is a warning/early-signal, not a guaranteed loss.** Run it, get the candidate cohort, then confirm against the delivered CSV — if the visits actually landed, note it in the delivery narrative; if they didn't, escalate. Do not silently drop the POIs from the sample without first confirming they'd have been shipped empty.
