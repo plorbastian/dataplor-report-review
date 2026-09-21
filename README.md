@@ -28,7 +28,7 @@ Naive score-thresholding on either report type produces catastrophic false posit
 
 The methodology below is designed to catch each failure mode explicitly, with per-POI LLM reasoning as the decider (never regex or hardcoded rules on the approval path).
 
-## dupelex — 7 phases
+## dupelex — 9 phases
 
 | Phase | Module | Input | Output |
 |-------|--------|-------|--------|
@@ -39,10 +39,16 @@ The methodology below is designed to catch each failure mode explicitly, with pe
 | 3. LLM Review | `dupelex.llm_review` | medium tier | verdicts MERGE / DISTINCT / UNCLEAR per pair |
 | 3.5. Safety | `dupelex.safety` + `dupelex.strict` | consolidated merge list | strict-name components, container+tenant + practitioner rejects |
 | 4. Push | `dupelex.merge_push` | final pair CSV | matches:process rake task on Fargate |
+| 4.5. Post-audit | `dupelex.post_audit` | pushed pair list + DB | reversal candidates (transitive drift + cross-brand + provisional flip) |
 | 5. Cleanup | `dupelex.sample_cleanup` | sample_id | DELETE from sample_places WHERE parent_id IS NOT NULL |
+| 5b. Unmerge | `dupelex.unmerge` | reversal candidates + original pairs | matches:process --split rake task on Fargate |
 | 6. Verify | `dupelex.verify` | sample_id | prod + places_read state check |
 
 **Failure modes this catches:** Chase-ATM pattern, container+tenant (mall + Zara), practitioner sharing a building (15 doctors + Makati Med + BDO ATM), subsidiaries (BPI Leasing + BPI Foundation), rebrand naming variants (Popeyes Chicken vs Popeyes Louisiana Kitchen), transitive drift (A↔B + B↔C + C↔D forming a 4-way false component).
+
+**Failure modes the post-audit catches after Phase 4:** transitive drift across UK outward postcodes, cross-brand within a component (starbucks + blankstreet, starbucks + caffe_nero), provisional flips where a verified child ends up under a provisional parent. First hit on 2026-09-21 GB coffee (Starbucks + Costa + Caffè Nero UK): 71 POIs flagged and unmerged via `matches:process --split`.
+
+**About unmerges:** the pipeline is forward-only through Phase 4. Once a pair has been pushed via `matches:process`, the only supported reversal is `matches:process --split` (same rake task, `action="different"`, `state="same"`, routed internally to `PlaceMergeProcessorService(should_merge:false)`). There is no observation path for `parent_id`.
 
 Full write-up: [docs/dupelex/methodology.md](docs/dupelex/methodology.md).
 
