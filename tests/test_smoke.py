@@ -24,7 +24,7 @@ class TestDupelex(unittest.TestCase):
     def test_public_surface(self):
         from dataplor_report_review.dupelex import (
             filter, enrich, guard, reguard, llm_review, safety, strict,
-            merge_push, sample_cleanup, verify,
+            merge_push, sample_cleanup, verify, post_audit, unmerge,
         )
         # Guard has the category families
         self.assertGreaterEqual(len(guard.CATEGORY_FAMILIES), 5)
@@ -32,6 +32,79 @@ class TestDupelex(unittest.TestCase):
         self.assertTrue(callable(safety.safety_reject))
         # Strict has the component builder
         self.assertTrue(callable(strict.build_components))
+        # Post-audit detectors are all callable
+        self.assertTrue(callable(post_audit.audit_merges))
+        self.assertTrue(callable(post_audit.detect_transitive_drift))
+        self.assertTrue(callable(post_audit.detect_cross_brand))
+        self.assertTrue(callable(post_audit.detect_provisional_flip))
+        # Unmerge exposes end-to-end + granular helpers
+        self.assertTrue(callable(unmerge.edges_touching))
+        self.assertTrue(callable(unmerge.write_unmerge_csv))
+        self.assertTrue(callable(unmerge.unmerge))
+
+
+class TestDupelexPostAudit(unittest.TestCase):
+    """Behavioural tests for the failure-mode detectors, using
+    fixtures modelled after the 2026-09-21 GB coffee incident."""
+
+    def test_transitive_drift_flags_only_the_outliers(self):
+        from dataplor_report_review.dupelex.post_audit import (
+            audit_merges, ReversalCandidate,
+        )
+        # Component {1,2,3,4}: three in TR14, one straggler in E1 5SD.
+        pairs = [(1, 2), (2, 3), (3, 4)]
+        meta = {
+            1: {"postcode": "TR14 8DT"},
+            2: {"postcode": "TR14 8DT"},
+            3: {"postcode": "TR14 8DT"},
+            4: {"postcode": "E1 5SD"},  # the outlier
+        }
+        out = audit_merges(pairs, meta, country="gb")
+        pids = {c.place_id for c in out}
+        self.assertEqual(pids, {4})
+        self.assertTrue(any(
+            "TRANSITIVE_DRIFT" in r for r in out[0].failure_modes
+        ))
+
+    def test_cross_brand_flags_the_smaller_chain(self):
+        from dataplor_report_review.dupelex.post_audit import audit_merges
+        # {10, 11} both starbucks, {12} caffe_nero, all linked.
+        pairs = [(10, 11), (11, 12)]
+        meta = {
+            10: {"chain_id": "starbucks", "postcode": "SE1 8LL"},
+            11: {"chain_id": "starbucks", "postcode": "SE1 8LL"},
+            12: {"chain_id": "caffe_nero", "postcode": "SE1 8LL"},
+        }
+        out = audit_merges(pairs, meta, country="gb")
+        pids = {c.place_id for c in out}
+        self.assertEqual(pids, {12})
+        self.assertTrue(any(
+            "CROSS_BRAND" in r for r in out[0].failure_modes
+        ))
+
+    def test_provisional_flip_off_by_default(self):
+        from dataplor_report_review.dupelex.post_audit import audit_merges
+        pairs = [(20, 21)]
+        meta = {
+            20: {"provisional": False, "parent_id": 21,
+                 "postcode": "N1 9AA", "chain_id": "starbucks"},
+            21: {"provisional": True, "parent_id": None,
+                 "postcode": "N1 9AA", "chain_id": "starbucks"},
+        }
+        # Off by default -> no findings
+        self.assertEqual(audit_merges(pairs, meta), [])
+        # On explicitly -> flagged
+        out = audit_merges(pairs, meta, include_provisional_flip=True)
+        pids = {c.place_id for c in out}
+        self.assertEqual(pids, {20})
+
+    def test_unmerge_edges_touching_selects_correctly(self):
+        from dataplor_report_review.dupelex.unmerge import edges_touching
+        pushed = [(1, 2), (2, 3), (3, 4), (5, 6)]
+        selected = edges_touching(pushed, [4])
+        self.assertEqual(selected, [(3, 4)])
+        selected2 = edges_touching(pushed, [2, 6])
+        self.assertEqual(selected2, [(1, 2), (2, 3), (5, 6)])
 
 
 class TestChain(unittest.TestCase):
