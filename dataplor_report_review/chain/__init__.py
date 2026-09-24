@@ -11,6 +11,7 @@ Phases:
 
 See docs/chain/methodology.md for the reasoning behind each rule.
 """
-from . import filter, enrich, llm_review, apply, verify
+from . import filter, enrich, llm_review, apply, verify, retrieval_gap
 
-__all__ = ["filter", "enrich", "llm_review", "apply", "verify"]
+__all__ = ["filter", "enrich", "llm_review", "apply", "verify",
+           "retrieval_gap"]
