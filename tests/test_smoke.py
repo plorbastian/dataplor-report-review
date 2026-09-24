@@ -37,10 +37,24 @@ class TestDupelex(unittest.TestCase):
 class TestChain(unittest.TestCase):
     def test_public_surface(self):
         from dataplor_report_review.chain import (
-            filter, enrich, llm_review, apply, verify,
+            filter, enrich, llm_review, apply, verify, retrieval_gap,
         )
         self.assertEqual(filter.DEFAULT_MIN_SCORE, 0.5)
         self.assertTrue(callable(llm_review.batch_verdict))
+        for name in ("load_kuebiko_raw", "find_domain_orphans",
+                     "find_name_prefix_orphans", "cross_check_official_pins",
+                     "retrieval_gap_report", "write_findings_csv"):
+            self.assertTrue(hasattr(retrieval_gap, name),
+                            f"chain.retrieval_gap missing {name}")
+
+    def test_retrieval_gap_norm_domain(self):
+        from dataplor_report_review.chain.retrieval_gap import _norm_domain
+        self.assertEqual(_norm_domain("http://www.bara.com.mx/tiendas"),
+                         "bara.com.mx")
+        self.assertEqual(_norm_domain("https://Tiendas3B.com/"),
+                         "tiendas3b.com")
+        self.assertEqual(_norm_domain(""), "")
+        self.assertEqual(_norm_domain(None), "")
 
 
 class TestExportQA(unittest.TestCase):
