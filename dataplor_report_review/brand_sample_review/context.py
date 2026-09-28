@@ -11,11 +11,46 @@ For each `chain_id` in the sample we need:
   - name variants from `brand_names` — used to score how well a POI
     name anchors to the brand, e.g. 'Tienda Bara' vs 'Tiendas Bara'
 
+Every category key referenced from the three list-columns MUST exist in
+the `business_categories` taxonomy table. `load_brand_context` enforces
+this by default — it queries the taxonomy and raises `InvalidCategoryError`
+if any brand carries a category key that does not resolve. This prevents
+silent typo-drift like `supermarcet` or a category deprecated upstream
+from being accepted at review time and quietly excluding real POIs from
+the sample.
+
 The returned structure is fed to `review.review_pois()` verbatim.
 """
 
 
-def load_brand_context(conn, chain_ids):
+class InvalidCategoryError(ValueError):
+    """Raised by `load_brand_context` when a brand's category lists
+    contain a key that is not present in `business_categories.key`.
+
+    The exception carries `.invalid` — a dict mapping `chain_id -> {
+    "core_1": [...], "core_2": [...], "business_cats": [...] }` — listing
+    exactly which keys per brand and per bucket failed the check. That
+    lets a caller either fix the brand metadata (correct typo, add the
+    missing key to the taxonomy) or explicitly bypass with
+    `validate_categories=False` for a diagnostic run.
+    """
+
+    def __init__(self, message, invalid):
+        super().__init__(message)
+        self.invalid = invalid
+
+
+def _load_valid_category_keys(conn):
+    """Return the set of `business_categories.key` values known upstream.
+
+    Uses `SELECT DISTINCT key` — the table has one row per taxonomy key.
+    """
+    with conn.cursor() as c:
+        c.execute("SELECT key FROM business_categories")
+        return {row[0] for row in c.fetchall() if row[0]}
+
+
+def load_brand_context(conn, chain_ids, *, validate_categories=True):
     """Return dict[chain_id -> brand_ctx].
 
     brand_ctx keys:
@@ -76,6 +111,31 @@ def load_brand_context(conn, chain_ids):
             "domains": domains_by_brand.get(bid, []),
             "names": names_by_brand.get(bid, []),
         }
+
+    if validate_categories and out:
+        valid_keys = _load_valid_category_keys(conn)
+        invalid = {}
+        for chain_key, ctx in out.items():
+            buckets = {}
+            for bucket_name in ("core_1", "core_2", "business_cats"):
+                bad = [k for k in ctx.get(bucket_name, []) if k not in valid_keys]
+                if bad:
+                    buckets[bucket_name] = bad
+            if buckets:
+                invalid[chain_key] = buckets
+        if invalid:
+            preview = "; ".join(
+                f"{ck}: " + ", ".join(
+                    f"{b}={ks}" for b, ks in buckets.items()
+                )
+                for ck, buckets in invalid.items()
+            )
+            raise InvalidCategoryError(
+                "Brand category keys not present in business_categories "
+                f"taxonomy: {preview}",
+                invalid,
+            )
+
     return out
 
 

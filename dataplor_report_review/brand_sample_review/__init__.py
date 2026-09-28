@@ -40,5 +40,6 @@ Design notes:
   tagged (for that, use `chain.llm_review`).
 """
 from . import context, review, apply
+from .context import InvalidCategoryError
 
-__all__ = ["context", "review", "apply"]
+__all__ = ["context", "review", "apply", "InvalidCategoryError"]

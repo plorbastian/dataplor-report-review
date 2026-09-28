@@ -201,6 +201,79 @@ class TestBrandSampleReview(unittest.TestCase):
         self.assertEqual(out["fp_count"], 0)
         self.assertEqual(called, [])
 
+    def test_invalid_category_error_raised(self):
+        """Fake conn where business_categories has only 'supermarket'.
+        A brand carrying 'supermarcet' (typo) should raise
+        InvalidCategoryError with the offending keys."""
+        from dataplor_report_review.brand_sample_review import (
+            context as ctx_mod, InvalidCategoryError,
+        )
+
+        class _FakeCursor:
+            def __init__(self, outer):
+                self.outer = outer; self._results = []
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def execute(self, sql, params=None):
+                s = sql.strip().lower()
+                if "from brands" in s:
+                    # (id, key, name, c1, c2, bc)
+                    self._results = [(1, "brand_x", "Brand X",
+                                      ["supermarcet"], [], ["supermarket"])]
+                elif "from brand_websites" in s:
+                    self._results = []
+                elif "from brand_names" in s:
+                    self._results = []
+                elif "from business_categories" in s:
+                    self._results = [("supermarket",)]
+                else:
+                    self._results = []
+            def fetchall(self):
+                return list(self._results)
+
+        class _FakeConn:
+            def cursor(self): return _FakeCursor(self)
+
+        with self.assertRaises(InvalidCategoryError) as cm:
+            ctx_mod.load_brand_context(_FakeConn(), ["brand_x"])
+        self.assertIn("brand_x", cm.exception.invalid)
+        self.assertIn("core_1", cm.exception.invalid["brand_x"])
+        self.assertEqual(cm.exception.invalid["brand_x"]["core_1"],
+                         ["supermarcet"])
+
+    def test_invalid_category_bypass_with_flag(self):
+        """validate_categories=False must skip the taxonomy check."""
+        from dataplor_report_review.brand_sample_review import (
+            context as ctx_mod,
+        )
+
+        class _FakeCursor:
+            def __init__(self): self._results = []
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def execute(self, sql, params=None):
+                s = sql.strip().lower()
+                if "from brands" in s:
+                    self._results = [(1, "brand_x", "Brand X",
+                                      ["supermarcet"], [], [])]
+                elif "from brand_websites" in s:
+                    self._results = []
+                elif "from brand_names" in s:
+                    self._results = []
+                elif "from business_categories" in s:
+                    self._results = [("supermarket",)]
+                else:
+                    self._results = []
+            def fetchall(self):
+                return list(self._results)
+
+        class _FakeConn:
+            def cursor(self): return _FakeCursor()
+
+        out = ctx_mod.load_brand_context(_FakeConn(), ["brand_x"],
+                                          validate_categories=False)
+        self.assertEqual(out["brand_x"]["core_1"], ["supermarcet"])
+
 
 class TestChain(unittest.TestCase):
     def test_public_surface(self):
