@@ -10,6 +10,20 @@ one of three verdicts:
   UNCLEAR     — signals mixed / insufficient; leave in DB unchanged and
                 surface the pair to the operator
 
+CANONICAL FIX for a category mismatch (per Javaria's `is_core` diagram):
+if a POI is a real store of the brand but its
+`business_category_id` is not among the brand's `business_category_ids`,
+update the PLACE's category to match the brand — do NOT expand the
+brand's list to swallow the odd category. The brand row should
+represent what the brand actually IS, not accumulate every category
+the platform happens to tag a store with.
+
+Exception: a true sub-place (bakery inside a supermarket) legitimately
+carries a different category from the parent brand and should keep it,
+losing the parent brand's visitation on purpose. This module flags
+those cases as `corporate_office` style carve-outs — the reviewer
+decides whether to keep them in the sample.
+
 Signal families:
 
   NAME
@@ -23,13 +37,12 @@ Signal families:
        `Neto Wings`, `Abarrotes Barajas`, `Departamento 3B`.
 
   CATEGORY
-    +  cat in brand's `core_1` (strong positive)
-    +  cat in brand's `core_2` (medium positive)
-    +  cat in brand's `business_cats` (weak positive — accepted universe
-       but not core)
-    -  cat is `corporate_office` (weak negative — kept per operator
-       decision but not a storefront)
-    -  cat outside every list (strong negative)
+    +  cat in brand's `business_cats` — the only category signal that
+       drives is_core / visits at export.
+    -  cat is `corporate_office` — not a storefront but may be kept in
+       the sample per operator decision.
+    -  cat outside the brand's `business_cats` — the POI will lose
+       visits at export unless the category is corrected.
 
   DOMAIN
     +  website contains a brand-owned domain from `brand_ctx.domains`
@@ -48,9 +61,16 @@ Verdict logic:
   strong_pos == 1, other signals_neg                 -> UNCLEAR (low)
   no strong signals either way                       -> UNCLEAR (low)
 
-"Strong positive" = brand-variant name match, official-domain website,
-or core_1 category. "Strong negative" = FP name pattern or FP domain.
-Everything else contributes but does not flip the verdict on its own.
+"Strong positive" = brand-variant name match, brand-native name
+pattern, official-domain website, or business_cats category. "Strong
+negative" = FP name pattern or FP domain. Everything else contributes
+but does not flip the verdict on its own.
+
+Historical note: an earlier revision of this reviewer also inspected
+`core_1_category_ids` and `core_2_category_ids`. Those fields on
+`brands` are unused stale metadata (confirmed by their author in
+September 2026) and were removed so the module reflects only signals
+that actually drive the export path.
 
 The rule table is a summariser, not the decider. Callers should read
 `signals_pos` and `signals_neg` on each verdict and treat borderline
@@ -186,19 +206,19 @@ def review_one(poi, brand_ctx_for_chain):
         )
 
     # --- CATEGORY ---
-    if cat and cat in (ctx.get("core_1") or []):
-        signals_pos.append(f"category {cat!r} is in core_1 (primary)")
-    elif cat and cat in (ctx.get("core_2") or []):
-        signals_pos.append(f"category {cat!r} is in core_2 (secondary)")
-    elif cat and cat in (ctx.get("business_cats") or []):
-        signals_pos.append(f"category {cat!r} is in business_cats (broad)")
+    if cat and cat in (ctx.get("business_cats") or []):
+        signals_pos.append(
+            f"category {cat!r} is in brand.business_category_ids (is_core=true)"
+        )
     elif cat == "corporate_office":
         signals_neg.append(
             "category is corporate_office (not a storefront)"
         )
     elif cat:
         signals_neg.append(
-            f"category {cat!r} is outside brand's category universe"
+            f"category {cat!r} is outside brand.business_category_ids "
+            "(is_core=false — visits would be stripped at export unless "
+            "the place's category is updated to match the brand)"
         )
     else:
         signals_neg.append("category is missing")
@@ -230,7 +250,7 @@ def review_one(poi, brand_ctx_for_chain):
     def _is_strong_pos(s):
         return any(k in s for k in
                    ("brand variant", "official brand domain",
-                    "core_1", "brand-native pattern"))
+                    "business_category_ids", "brand-native pattern"))
 
     def _is_strong_neg(s):
         return "FP pattern" in s or "FP domain" in s

@@ -2,37 +2,44 @@
 
 For each `chain_id` in the sample we need:
 
-  - `core_1_category_ids`  — the brand's primary retail format
-  - `core_2_category_ids`  — the brand's secondary formats
-  - `business_category_ids` — the broadest accepted category universe
+  - `business_category_ids` — the set of category keys the brand
+    considers "its own". A place is `is_core=true` (visits preserved
+    at export, visible on platform) iff its `business_category_id`
+    is in this list.
   - domain(s) from `brand_websites`  — the brand's official domain(s),
     used both as a positive signal ("website contains the brand's own
-    domain") and to disambiguate from same-name competitor brands
+    domain") and to disambiguate from same-name competitor brands.
   - name variants from `brand_names` — used to score how well a POI
-    name anchors to the brand, e.g. 'Tienda Bara' vs 'Tiendas Bara'
+    name anchors to the brand, e.g. 'Tienda Bara' vs 'Tiendas Bara'.
 
-Every category key referenced from the three list-columns MUST exist in
-the `business_categories` taxonomy table. `load_brand_context` enforces
-this by default — it queries the taxonomy and raises `InvalidCategoryError`
-if any brand carries a category key that does not resolve. This prevents
-silent typo-drift like `supermarcet` or a category deprecated upstream
-from being accepted at review time and quietly excluding real POIs from
-the sample.
+Every category key referenced from `business_category_ids` MUST exist
+in the `business_categories` taxonomy table. `load_brand_context`
+enforces this by default — it queries the taxonomy and raises
+`InvalidCategoryError` if any brand carries a category key that does
+not resolve. This prevents silent typo-drift like `supermarcet` or a
+category deprecated upstream from being accepted at review time and
+quietly excluding real POIs from the sample.
+
+Historical note: an earlier revision of this loader also read
+`core_1_category_ids` and `core_2_category_ids`. Those columns exist
+on `brands` but are unused stale metadata — confirmed by their author
+in September 2026 — and were removed here so the module reflects only
+signals that actually drive the export path.
 
 The returned structure is fed to `review.review_pois()` verbatim.
 """
 
 
 class InvalidCategoryError(ValueError):
-    """Raised by `load_brand_context` when a brand's category lists
-    contain a key that is not present in `business_categories.key`.
+    """Raised by `load_brand_context` when a brand's `business_category_ids`
+    contains a key that is not present in `business_categories.key`.
 
-    The exception carries `.invalid` — a dict mapping `chain_id -> {
-    "core_1": [...], "core_2": [...], "business_cats": [...] }` — listing
-    exactly which keys per brand and per bucket failed the check. That
-    lets a caller either fix the brand metadata (correct typo, add the
-    missing key to the taxonomy) or explicitly bypass with
-    `validate_categories=False` for a diagnostic run.
+    The exception carries `.invalid` — a dict mapping
+    `chain_id -> [bad keys]` — listing exactly which keys per brand
+    failed the check. That lets a caller either fix the brand
+    metadata (correct typo, add the missing key to the taxonomy) or
+    explicitly bypass with `validate_categories=False` for a
+    diagnostic run.
     """
 
     def __init__(self, message, invalid):
@@ -55,9 +62,8 @@ def load_brand_context(conn, chain_ids, *, validate_categories=True):
 
     brand_ctx keys:
       name           — human-readable brand name from `brands.name`
-      core_1         — list[str] of category keys
-      core_2         — list[str] of category keys
-      business_cats  — list[str] of category keys (superset)
+      business_cats  — list[str] of category keys from
+                       `brands.business_category_ids`
       domains        — list[str] of bare-domain forms from `brand_websites`
       names          — list[str] of name variants from `brand_names`
 
@@ -72,8 +78,6 @@ def load_brand_context(conn, chain_ids, *, validate_categories=True):
         c.execute("""
             SELECT
                 b.id, b.key, b.name,
-                b.core_1_category_ids,
-                b.core_2_category_ids,
                 b.business_category_ids
             FROM brands b
             WHERE b.key IN %s
@@ -102,11 +106,9 @@ def load_brand_context(conn, chain_ids, *, validate_categories=True):
             names_by_brand.setdefault(bid, []).append(nm)
 
     out = {}
-    for bid, key, name, c1, c2, bc in brand_rows:
+    for bid, key, name, bc in brand_rows:
         out[key] = {
             "name": name,
-            "core_1": list(c1 or []),
-            "core_2": list(c2 or []),
             "business_cats": list(bc or []),
             "domains": domains_by_brand.get(bid, []),
             "names": names_by_brand.get(bid, []),
@@ -116,23 +118,16 @@ def load_brand_context(conn, chain_ids, *, validate_categories=True):
         valid_keys = _load_valid_category_keys(conn)
         invalid = {}
         for chain_key, ctx in out.items():
-            buckets = {}
-            for bucket_name in ("core_1", "core_2", "business_cats"):
-                bad = [k for k in ctx.get(bucket_name, []) if k not in valid_keys]
-                if bad:
-                    buckets[bucket_name] = bad
-            if buckets:
-                invalid[chain_key] = buckets
+            bad = [k for k in ctx.get("business_cats", []) if k not in valid_keys]
+            if bad:
+                invalid[chain_key] = bad
         if invalid:
             preview = "; ".join(
-                f"{ck}: " + ", ".join(
-                    f"{b}={ks}" for b, ks in buckets.items()
-                )
-                for ck, buckets in invalid.items()
+                f"{ck}: {ks}" for ck, ks in invalid.items()
             )
             raise InvalidCategoryError(
-                "Brand category keys not present in business_categories "
-                f"taxonomy: {preview}",
+                "Brand business_category_ids keys not present in "
+                f"business_categories taxonomy: {preview}",
                 invalid,
             )
 

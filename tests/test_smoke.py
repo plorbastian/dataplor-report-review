@@ -126,10 +126,8 @@ class TestBrandSampleReview(unittest.TestCase):
         from dataplor_report_review.brand_sample_review.review import review_one
         ctx = {
             "name": "Tiendas Bara",
-            "core_1": ["supermarket", "grocery_store"],
-            "core_2": ["store", "shopping_center"],
-            "business_cats": ["supermarket", "grocery_store", "store",
-                              "shopping_center"],
+            "business_cats": ["supermarket", "grocery_store",
+                              "convenience_store"],
             "domains": ["bara.com.mx"],
             "names": ["Tiendas Bara", "Tienda Bara", "Bara"],
         }
@@ -142,8 +140,8 @@ class TestBrandSampleReview(unittest.TestCase):
 
     def test_fp_unchain_on_bara_bara_fashion(self):
         from dataplor_report_review.brand_sample_review.review import review_one
-        ctx = {"name": "Tiendas Bara", "core_1": [], "core_2": [],
-               "business_cats": [], "domains": ["bara.com.mx"], "names": []}
+        ctx = {"name": "Tiendas Bara", "business_cats": [],
+               "domains": ["bara.com.mx"], "names": []}
         poi = {"id": 2, "name": "Tiendas Bara Bara", "chain": "tiendas_bara",
                "cat": "clothing_store", "website": "",
                "provisional": False}
@@ -153,7 +151,6 @@ class TestBrandSampleReview(unittest.TestCase):
     def test_corporate_office_kept_medium(self):
         from dataplor_report_review.brand_sample_review.review import review_one
         ctx = {"name": "Tiendas 3B",
-               "core_1": ["supermarket"], "core_2": [],
                "business_cats": ["supermarket"],
                "domains": ["tiendas3b.com"],
                "names": ["Tiendas 3B", "Tienda 3B"]}
@@ -203,8 +200,8 @@ class TestBrandSampleReview(unittest.TestCase):
 
     def test_invalid_category_error_raised(self):
         """Fake conn where business_categories has only 'supermarket'.
-        A brand carrying 'supermarcet' (typo) should raise
-        InvalidCategoryError with the offending keys."""
+        A brand carrying 'supermarcet' (typo) in business_category_ids
+        should raise InvalidCategoryError with the offending keys."""
         from dataplor_report_review.brand_sample_review import (
             context as ctx_mod, InvalidCategoryError,
         )
@@ -217,9 +214,9 @@ class TestBrandSampleReview(unittest.TestCase):
             def execute(self, sql, params=None):
                 s = sql.strip().lower()
                 if "from brands" in s:
-                    # (id, key, name, c1, c2, bc)
+                    # (id, key, name, business_category_ids)
                     self._results = [(1, "brand_x", "Brand X",
-                                      ["supermarcet"], [], ["supermarket"])]
+                                      ["supermarket", "supermarcet"])]
                 elif "from brand_websites" in s:
                     self._results = []
                 elif "from brand_names" in s:
@@ -237,9 +234,7 @@ class TestBrandSampleReview(unittest.TestCase):
         with self.assertRaises(InvalidCategoryError) as cm:
             ctx_mod.load_brand_context(_FakeConn(), ["brand_x"])
         self.assertIn("brand_x", cm.exception.invalid)
-        self.assertIn("core_1", cm.exception.invalid["brand_x"])
-        self.assertEqual(cm.exception.invalid["brand_x"]["core_1"],
-                         ["supermarcet"])
+        self.assertEqual(cm.exception.invalid["brand_x"], ["supermarcet"])
 
     def test_invalid_category_bypass_with_flag(self):
         """validate_categories=False must skip the taxonomy check."""
@@ -255,7 +250,7 @@ class TestBrandSampleReview(unittest.TestCase):
                 s = sql.strip().lower()
                 if "from brands" in s:
                     self._results = [(1, "brand_x", "Brand X",
-                                      ["supermarcet"], [], [])]
+                                      ["supermarcet"])]
                 elif "from brand_websites" in s:
                     self._results = []
                 elif "from brand_names" in s:
@@ -272,7 +267,7 @@ class TestBrandSampleReview(unittest.TestCase):
 
         out = ctx_mod.load_brand_context(_FakeConn(), ["brand_x"],
                                           validate_categories=False)
-        self.assertEqual(out["brand_x"]["core_1"], ["supermarcet"])
+        self.assertEqual(out["brand_x"]["business_cats"], ["supermarcet"])
 
 
 class TestChain(unittest.TestCase):
