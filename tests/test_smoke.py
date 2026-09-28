@@ -107,6 +107,101 @@ class TestDupelexPostAudit(unittest.TestCase):
         self.assertEqual(selected2, [(1, 2), (2, 3), (5, 6)])
 
 
+class TestBrandSampleReview(unittest.TestCase):
+    def test_public_surface(self):
+        from dataplor_report_review.brand_sample_review import (
+            context, review, apply,
+        )
+        for name in ("load_brand_context", "load_sample_pois"):
+            self.assertTrue(hasattr(context, name),
+                            f"context missing {name}")
+        for name in ("review_one", "review_pois", "summarise"):
+            self.assertTrue(hasattr(review, name),
+                            f"review missing {name}")
+        for name in ("build_unchain_rows", "apply_unchains"):
+            self.assertTrue(hasattr(apply, name),
+                            f"apply missing {name}")
+
+    def test_keep_high_on_clean_bara(self):
+        from dataplor_report_review.brand_sample_review.review import review_one
+        ctx = {
+            "name": "Tiendas Bara",
+            "core_1": ["supermarket", "grocery_store"],
+            "core_2": ["store", "shopping_center"],
+            "business_cats": ["supermarket", "grocery_store", "store",
+                              "shopping_center"],
+            "domains": ["bara.com.mx"],
+            "names": ["Tiendas Bara", "Tienda Bara", "Bara"],
+        }
+        poi = {"id": 1, "name": "Bara Los Murales", "chain": "tiendas_bara",
+               "cat": "supermarket", "website": "http://bara.com.mx/",
+               "provisional": False}
+        v = review_one(poi, ctx)
+        self.assertEqual(v["verdict"], "KEEP")
+        self.assertEqual(v["confidence"], "high")
+
+    def test_fp_unchain_on_bara_bara_fashion(self):
+        from dataplor_report_review.brand_sample_review.review import review_one
+        ctx = {"name": "Tiendas Bara", "core_1": [], "core_2": [],
+               "business_cats": [], "domains": ["bara.com.mx"], "names": []}
+        poi = {"id": 2, "name": "Tiendas Bara Bara", "chain": "tiendas_bara",
+               "cat": "clothing_store", "website": "",
+               "provisional": False}
+        v = review_one(poi, ctx)
+        self.assertEqual(v["verdict"], "FP_UNCHAIN")
+
+    def test_corporate_office_kept_medium(self):
+        from dataplor_report_review.brand_sample_review.review import review_one
+        ctx = {"name": "Tiendas 3B",
+               "core_1": ["supermarket"], "core_2": [],
+               "business_cats": ["supermarket"],
+               "domains": ["tiendas3b.com"],
+               "names": ["Tiendas 3B", "Tienda 3B"]}
+        poi = {"id": 3, "name": "Corporativo Tiendas 3B Guadalajara",
+               "chain": "tiendas_3b", "cat": "corporate_office",
+               "website": "", "provisional": False}
+        v = review_one(poi, ctx)
+        self.assertEqual(v["verdict"], "KEEP")
+
+    def test_no_brand_context_is_unclear(self):
+        from dataplor_report_review.brand_sample_review.review import review_one
+        poi = {"id": 4, "name": "Whatever", "chain": "no_such_brand",
+               "cat": "supermarket", "website": "", "provisional": False}
+        v = review_one(poi, None)
+        self.assertEqual(v["verdict"], "UNCLEAR")
+
+    def test_build_unchain_rows_shapes_correctly(self):
+        from dataplor_report_review.brand_sample_review.apply import (
+            build_unchain_rows,
+        )
+        verdicts = [
+            {"id": 10, "verdict": "KEEP"},
+            {"id": 11, "verdict": "FP_UNCHAIN"},
+            {"id": 12, "verdict": "UNCLEAR"},
+            {"id": 13, "verdict": "FP_UNCHAIN"},
+        ]
+        rows = build_unchain_rows(verdicts)
+        self.assertEqual([r["place_id"] for r in rows], [11, 13])
+        for r in rows:
+            self.assertEqual(r["path"], "/chain_id")
+            self.assertEqual(r["value"], "")  # empty string, not None
+            self.assertEqual(r["observation_type"], "ManualObservation")
+
+    def test_apply_unchains_noop_when_no_fps(self):
+        from dataplor_report_review.brand_sample_review.apply import (
+            apply_unchains,
+        )
+        called = []
+        def writer(rows, admin_id):
+            called.append((rows, admin_id))
+        def ptu(pids):
+            called.append(("ptu", pids))
+        out = apply_unchains([{"id": 1, "verdict": "KEEP"}], writer, 42476,
+                              ptu_trigger=ptu)
+        self.assertEqual(out["fp_count"], 0)
+        self.assertEqual(called, [])
+
+
 class TestChain(unittest.TestCase):
     def test_public_surface(self):
         from dataplor_report_review.chain import (
